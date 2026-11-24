@@ -20,6 +20,7 @@ type mockRegistry struct {
 	kernelSymbolStore datastores.KernelSymbolStore
 	dnsStore          datastores.DNSStore
 	syscallStore      datastores.SyscallStore
+	ipReputationStore datastores.IPReputationStore
 }
 
 func (m *mockRegistry) Processes() datastores.ProcessStore {
@@ -44,6 +45,10 @@ func (m *mockRegistry) DNS() datastores.DNSStore {
 
 func (m *mockRegistry) Syscalls() datastores.SyscallStore {
 	return m.syscallStore
+}
+
+func (m *mockRegistry) IPReputation() datastores.IPReputationStore {
+	return m.ipReputationStore
 }
 
 func (m *mockRegistry) GetCustom(name string) (datastores.DataStore, error) {

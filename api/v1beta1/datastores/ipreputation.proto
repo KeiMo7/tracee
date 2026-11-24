@@ -4,11 +4,16 @@ package tracee.v1beta1.datastores;
 
 option go_package = "github.com/aquasecurity/tracee/api/v1beta1/datastores;datastores";
 
+import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 
-// IPAddressKey is used for IP-based lookups
+// IPAddressKey is used for IP-based lookups.
+// The ip field accepts either a single address ("1.2.3.4", "2001:db8::1")
+// or a network in CIDR notation ("10.0.0.0/8", "2001:db8::/32").
+// The two forms share one key type so existing callers that only use exact
+// addresses keep working unchanged.
 message IPAddressKey {
-    string ip = 1;  // IP address (IPv4 or IPv6)
+    string ip = 1;  // IP address (IPv4 or IPv6), optionally with a prefix length
 }
 
 // ReputationStatus indicates the reputation classification
@@ -26,5 +31,17 @@ message IPReputation {
     repeated string tags = 3;  // e.g., ["botnet", "malware", "c2"]
     google.protobuf.Timestamp last_updated = 4;
     map<string, string> metadata = 5;  // Additional key-value metadata
-}
 
+    // ttl is the entry lifetime measured from the time the entry is written.
+    // A missing or zero ttl means the entry never expires.
+    google.protobuf.Duration ttl = 6;
+
+    // matched_prefix is set on read results when the entry was written as a
+    // network (CIDR). It is empty for entries written as exact addresses, so
+    // the result of an exact-address lookup is unchanged.
+    string matched_prefix = 7;
+
+    // expires_at is the absolute expiry time derived from ttl at write time.
+    // It is zero for entries that never expire.
+    google.protobuf.Timestamp expires_at = 8;
+}

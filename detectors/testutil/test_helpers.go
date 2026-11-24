@@ -65,6 +65,23 @@ func (m *MockDataStoreRegistry) System() datastores.SystemStore { return nil }
 // Syscalls returns nil (no syscall store available).
 func (m *MockDataStoreRegistry) Syscalls() datastores.SyscallStore { return nil }
 
+// IPReputation returns a store that reports no matches, so detectors that
+// depend on threat intelligence degrade gracefully in tests.
+func (m *MockDataStoreRegistry) IPReputation() datastores.IPReputationStore {
+	return emptyIPReputationStore{}
+}
+
+// emptyIPReputationStore is a no-hit IPReputationStore for tests.
+type emptyIPReputationStore struct{}
+
+func (emptyIPReputationStore) Match(string) (*datastores.IPReputationMatch, error) {
+	return nil, datastores.ErrNotFound
+}
+
+func (emptyIPReputationStore) MatchBatch(ips []string) (map[string]*datastores.IPReputationMatch, error) {
+	return map[string]*datastores.IPReputationMatch{}, nil
+}
+
 // GetCustom always returns ErrNotFound.
 func (m *MockDataStoreRegistry) GetCustom(name string) (datastores.DataStore, error) {
 	return nil, datastores.ErrNotFound

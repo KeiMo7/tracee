@@ -1479,6 +1479,12 @@ func (d *IPReputationDetector) Init(params detection.DetectorParams) error {
 ```
 {% endraw %}
 
+> For the built-in `ip_reputation` store this snippet is **not** the right
+> pattern: Tracee registers that store itself. See
+> [IP Reputation Lookups](#ip-reputation-lookups-longest-prefix) for the
+> supported way to write and read networks. The pattern below applies to custom
+> stores you define yourself.
+
 **Write to the store**:
 
 {% raw %}
@@ -1541,6 +1547,12 @@ func (d *ThreatAnalyzer) OnEvent(ctx context.Context, event *v1beta1.Event) ([]d
 - Others have read-only access (via `GetCustom()`)
 - No authorization code needed - access control via typing
 
+> **Note:** `ip_reputation` is a *core* store that Tracee always registers at
+> startup (see [IP Reputation Lookups](#ip-reputation-lookups-longest-prefix)).
+> A detector must not call `RegisterWritableStore("ip_reputation", ...)` for it;
+> use `Write`/`WriteBatch` on the existing store (obtained via `GetCustom`) or
+> ingest over the `DataStoreService` gRPC API instead.
+
 **Source Isolation:**
 
 - All write operations include a `source` parameter (e.g., `"local_detector"`, `"some_feed"`)
@@ -1553,6 +1565,77 @@ func (d *ThreatAnalyzer) OnEvent(ctx context.Context, event *v1beta1.Event) ([]d
 - Stores define their own behavior (conflict resolution, retention, etc.)
 - See `pkg/datastores/ipreputation/` for reference implementation
 - Custom stores implement the `WritableStore` interface
+
+### IP Reputation Lookups (Longest-Prefix)
+
+The `ip_reputation` store holds threat intelligence keyed by either a single
+address (`1.2.3.4`) or a network (`10.0.0.0/8`, `2001:db8::/32`). Lookups use
+longest-prefix match, so the most specific entry wins.
+
+**Writing** (a feed owner). The `IPAddressKey.ip` field accepts both forms:
+
+{% raw %}
+```go
+store := ipreputation.NewIPReputationStore(
+    ipreputation.MaxSeverity, // conflict resolution across sources
+    nil,                      // optional source priorities
+)
+
+// Single address, a /8 network and an IPv6 network.
+_ = store.WriteReputation("feed_a", "203.0.113.9", &ipreputation.IPReputation{
+    Status: ipreputation.ReputationDeny, Severity: 9, TTL: 24 * time.Hour,
+})
+_ = store.WriteReputation("feed_a", "10.0.0.0/8", &ipreputation.IPReputation{
+    Status: ipreputation.ReputationSuspicious, Severity: 4,
+})
+_ = store.WriteReputation("feed_a", "2001:db8::/32", &ipreputation.IPReputation{
+    Status: ipreputation.ReputationDeny, Severity: 7,
+})
+```
+{% endraw %}
+
+**Reading** (any detector), through CEL expressions:
+
+```yaml
+conditions:
+  - 'ip.match(getEventData("dst_ip")) != null'
+  - 'ip.isMalicious(getEventData("dst_ip"))'
+```
+
+`ip.match(addr)` returns a map with `query`, `ip`, `prefix`, `status`,
+`severity`, `tags`, `source`, `last_updated` and `expires_at`, or `null` when
+nothing matches. `ip.matchBatch(list)` returns an `ip -> match` map resolved
+against one consistent snapshot.
+
+Or from Go, via the typed read interface:
+
+{% raw %}
+```go
+store, _ := params.DataStores.GetCustom("ip_reputation")
+match, err := store.(datastores.IPReputationStore).Match(srcIP)
+if errors.Is(err, datastores.ErrNotFound) {
+    return nil, nil
+}
+```
+{% endraw %}
+
+**Behavioural guarantees:**
+
+- **Longest prefix wins.** A `/24` entry beats a `/8` entry for an address in both.
+- **Conflict resolution** applies only across sources for the *same* prefix
+  (`MaxSeverity`, `PriorityBased`, or `LastWriteWins`); it never overrides a more
+  specific prefix.
+- **Expiry.** An entry with a `TTL` (or an absolute `expires_at`) stops matching
+  at expiry and is reclaimed from memory by a background sweeper.
+- **Revocation.** `Clear(source)` removes every entry for that source
+  immediately; other sources' entries for the same prefix remain.
+- **Capacity.** When the entry count would exceed the configured `MaxEntries`,
+  the least-recently-written entries are evicted (expired ones first) and a
+  warning is logged. `Stats()` and `GetMetrics().Extra` report entries, capacity,
+  `expired_reclaimed` and `evicted`.
+- **Validation.** Malformed addresses and prefixes are rejected with an error;
+  a batch is rejected in full, naming the offending index. Nothing is stored
+  under a key that could never match.
 
 ---
 

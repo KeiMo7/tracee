@@ -91,18 +91,40 @@ func registerDatastoreFunctions(registry datastores.Registry) []cel.EnvOption {
 		),
 
 		// SyscallStore functions
-		cel.Function("syscall.getName",
-			cel.Overload("syscall_getName_int",
-				[]*cel.Type{cel.IntType},
-				cel.StringType, // Returns name or empty string
-				cel.UnaryBinding(createSyscallGetNameBinding(registry)),
-			),
+		cel.Function("syscall.getName", cel.Overload("syscall_getName_int",
+			[]*cel.Type{cel.IntType},
+			cel.StringType, // Returns name or empty string
+			cel.UnaryBinding(createSyscallGetNameBinding(registry)),
+		),
 		),
 		cel.Function("syscall.getId",
 			cel.Overload("syscall_getId_string",
 				[]*cel.Type{cel.StringType},
 				cel.IntType, // Returns ID or -1 if not found
 				cel.UnaryBinding(createSyscallGetIdBinding(registry)),
+			),
+		),
+
+		// IP reputation lookups (longest-prefix match over addresses and networks)
+		cel.Function("ip.match",
+			cel.Overload("ip_match_string",
+				[]*cel.Type{cel.StringType},
+				cel.DynType, // Returns a match map or null
+				cel.UnaryBinding(createIPMatchBinding(registry)),
+			),
+		),
+		cel.Function("ip.isMalicious",
+			cel.Overload("ip_isMalicious_string",
+				[]*cel.Type{cel.StringType},
+				cel.BoolType, // Returns true for deny/suspicious matches
+				cel.UnaryBinding(createIPIsMaliciousBinding(registry)),
+			),
+		),
+		cel.Function("ip.matchBatch",
+			cel.Overload("ip_matchBatch_list_string",
+				[]*cel.Type{cel.ListType(cel.StringType)},
+				cel.MapType(cel.StringType, cel.DynType), // Returns ip -> match map
+				cel.UnaryBinding(createIPMatchBatchBinding(registry)),
 			),
 		),
 	}
@@ -424,6 +446,130 @@ func createSyscallGetIdBinding(registry datastores.Registry) func(ref.Val) ref.V
 
 		return types.Int(id)
 	}
+}
+
+// Conversion helpers (convert datastore types to CEL values)
+
+// IP reputation bindings
+
+func createIPMatchBinding(registry datastores.Registry) func(ref.Val) ref.Val {
+	return func(arg ref.Val) ref.Val {
+		// Handle nil registry (validation mode)
+		if registry == nil {
+			return types.NullValue
+		}
+
+		ip, ok := arg.Value().(string)
+		if !ok {
+			return types.NewErr("ip.match: argument must be string")
+		}
+
+		store := registry.IPReputation()
+		if store == nil {
+			return types.NullValue
+		}
+
+		match, err := store.Match(ip)
+		if err != nil {
+			if errors.Is(err, datastores.ErrNotFound) {
+				return types.NullValue
+			}
+			return types.NewErr("ip.match: %v", err)
+		}
+
+		return convertIPMatchToCEL(match)
+	}
+}
+
+func createIPIsMaliciousBinding(registry datastores.Registry) func(ref.Val) ref.Val {
+	return func(arg ref.Val) ref.Val {
+		// Handle nil registry (validation mode)
+		if registry == nil {
+			return types.Bool(false)
+		}
+
+		ip, ok := arg.Value().(string)
+		if !ok {
+			return types.NewErr("ip.isMalicious: argument must be string")
+		}
+
+		store := registry.IPReputation()
+		if store == nil {
+			return types.Bool(false)
+		}
+
+		match, err := store.Match(ip)
+		if err != nil {
+			if errors.Is(err, datastores.ErrNotFound) {
+				return types.Bool(false)
+			}
+			return types.NewErr("ip.isMalicious: %v", err)
+		}
+
+		return types.Bool(match.Status == "deny" || match.Status == "suspicious")
+	}
+}
+
+func createIPMatchBatchBinding(registry datastores.Registry) func(ref.Val) ref.Val {
+	return func(arg ref.Val) ref.Val {
+		if registry == nil {
+			return types.DefaultTypeAdapter.NativeToValue(map[string]any{})
+		}
+
+		ips, ok := arg.Value().([]ref.Val)
+		if !ok {
+			return types.NewErr("ip.matchBatch: argument must be a list of strings")
+		}
+
+		list := make([]string, 0, len(ips))
+		for i, v := range ips {
+			s, ok := v.Value().(string)
+			if !ok {
+				return types.NewErr("ip.matchBatch: element %d must be string", i)
+			}
+			list = append(list, s)
+		}
+
+		store := registry.IPReputation()
+		if store == nil {
+			return types.DefaultTypeAdapter.NativeToValue(map[string]any{})
+		}
+
+		matches, err := store.MatchBatch(list)
+		if err != nil {
+			return types.NewErr("ip.matchBatch: %v", err)
+		}
+
+		out := make(map[string]any, len(matches))
+		for ip, match := range matches {
+			out[ip] = ipMatchMap(match)
+		}
+		return types.DefaultTypeAdapter.NativeToValue(out)
+	}
+}
+
+func convertIPMatchToCEL(m *datastores.IPReputationMatch) ref.Val {
+	return types.DefaultTypeAdapter.NativeToValue(ipMatchMap(m))
+}
+
+func ipMatchMap(m *datastores.IPReputationMatch) map[string]any {
+	data := map[string]any{
+		"query":        m.Query,
+		"ip":           m.IP,
+		"prefix":       m.Prefix,
+		"status":       m.Status,
+		"severity":     int64(m.Severity),
+		"tags":         m.Tags,
+		"source":       m.Source,
+		"last_updated": m.LastUpdated.Unix(),
+		"metadata":     m.Metadata,
+	}
+	if !m.ExpiresAt.IsZero() {
+		data["expires_at"] = m.ExpiresAt.Unix()
+	} else {
+		data["expires_at"] = int64(0)
+	}
+	return data
 }
 
 // Conversion helpers (convert datastore types to CEL values)

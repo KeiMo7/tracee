@@ -11,6 +11,7 @@ import (
 	"github.com/aquasecurity/tracee/common/logger"
 	"github.com/aquasecurity/tracee/pkg/datastores/container/runtime"
 	"github.com/aquasecurity/tracee/pkg/datastores/dns"
+	"github.com/aquasecurity/tracee/pkg/datastores/ipreputation"
 	"github.com/aquasecurity/tracee/pkg/datastores/process"
 	"github.com/aquasecurity/tracee/pkg/signatures/engine"
 )
@@ -57,6 +58,7 @@ type Config struct {
 	CgroupFSForce     bool
 	EngineConfig      engine.Config
 	DNSStore          dns.Config
+	IPReputationStore ipreputation.Config
 	MetricsEnabled    bool
 	HealthzEnabled    bool
 	DetectorConfig    DetectorConfig

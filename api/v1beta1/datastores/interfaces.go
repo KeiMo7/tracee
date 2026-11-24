@@ -206,6 +206,23 @@ type WritableStore interface {
 	ListSources() ([]string, error)
 }
 
+// IPReputationStore is the read interface for the "ip_reputation" datastore.
+//
+// Entries may be written as single addresses or as networks in CIDR notation;
+// lookups use longest-prefix match, so the most specific entry wins. Detectors
+// access it through Registry.GetCustom("ip_reputation") and a type assertion to
+// this interface, or through the CEL "ip.match" / "ip.matchBatch" functions.
+type IPReputationStore interface {
+	// Match returns the longest-prefix match for an address or the exact entry
+	// for a network. Returns ErrNotFound when nothing matches and
+	// ErrInvalidArgument when the input is malformed.
+	Match(ip string) (*IPReputationMatch, error)
+
+	// MatchBatch resolves multiple addresses against one consistent snapshot.
+	// Addresses without a match are omitted; malformed input fails the call.
+	MatchBatch(ips []string) (map[string]*IPReputationMatch, error)
+}
+
 // Runtime is implemented by extension-provided services that back the gRPC
 // DataStoreService. Each runtime owns one or more writable stores by name.
 type Runtime interface {

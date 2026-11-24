@@ -180,3 +180,33 @@ func (n *nullSyscallStore) GetSyscallName(id int32) (string, error) {
 func (n *nullSyscallStore) GetSyscallID(name string) (int32, error) {
 	return 0, datastores.ErrStoreUnhealthy
 }
+
+// nullIPReputationStore implements datastores.IPReputationStore and reports
+// "nothing matches" for every query. It is used only if the concrete store
+// fails to register; the real store is always registered at startup.
+type nullIPReputationStore struct{}
+
+func (n *nullIPReputationStore) Name() string { return "null_ip_reputation" }
+
+func (n *nullIPReputationStore) GetHealth() *datastores.HealthInfo {
+	return &datastores.HealthInfo{
+		Status:    datastores.HealthUnhealthy,
+		Message:   "ip reputation store not available",
+		LastCheck: time.Now(),
+	}
+}
+
+func (n *nullIPReputationStore) GetMetrics() *datastores.DataStoreMetrics {
+	return &datastores.DataStoreMetrics{
+		ItemCount:  0,
+		LastAccess: time.Now(),
+	}
+}
+
+func (n *nullIPReputationStore) Match(ip string) (*datastores.IPReputationMatch, error) {
+	return nil, datastores.ErrStoreUnhealthy
+}
+
+func (n *nullIPReputationStore) MatchBatch(ips []string) (map[string]*datastores.IPReputationMatch, error) {
+	return nil, datastores.ErrStoreUnhealthy
+}

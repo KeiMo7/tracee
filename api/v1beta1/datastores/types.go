@@ -60,6 +60,25 @@ type DNSResponse struct {
 	Domains []string // Resolved domain names (for reverse lookups)
 }
 
+// IPReputationMatch is the result of an IP reputation lookup.
+//
+// A lookup that hits an exact-address entry leaves Prefix empty and sets IP to
+// the canonical address. A lookup that hits a network entry sets Prefix to the
+// matched network in CIDR notation and IP to that network's base address, so
+// callers can tell which feed entry was responsible.
+type IPReputationMatch struct {
+	Query       string            // Address or network as supplied by the caller
+	IP          string            // Canonical matched address or network base
+	Prefix      string            // Matched network in CIDR form, empty for exact entries
+	Status      string            // "allow", "deny", "suspicious" or "unknown"
+	Severity    int               // 1-10 severity score
+	Tags        []string          // Feed tags, e.g. ["botnet", "c2"]
+	Source      string            // Source that supplied the winning entry
+	LastUpdated time.Time         // When the source last updated the entry
+	ExpiresAt   time.Time         // When the entry stops matching; zero means never
+	Metadata    map[string]string // Additional key-value metadata
+}
+
 // HealthStatus represents the health state of a datastore
 type HealthStatus int
 
@@ -95,6 +114,11 @@ type DataStoreMetrics struct {
 	CacheHits    uint64    // Number of cache hits (if applicable)
 	CacheMisses  uint64    // Number of cache misses (if applicable)
 	LastAccess   time.Time // Last access time
+
+	// Extra carries store-specific counters that do not fit the common fields,
+	// such as expiry reclamations and capacity evictions. It is nil for stores
+	// that do not report any.
+	Extra map[string]int64
 }
 
 // DataStoreMetadata contains metadata about a datastore

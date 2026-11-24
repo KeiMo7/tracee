@@ -6,6 +6,7 @@ import (
 	"github.com/aquasecurity/tracee/api/v1beta1/datastores"
 	"github.com/aquasecurity/tracee/pkg/datastores/container"
 	"github.com/aquasecurity/tracee/pkg/datastores/dns"
+	"github.com/aquasecurity/tracee/pkg/datastores/ipreputation"
 	"github.com/aquasecurity/tracee/pkg/datastores/process"
 )
 
@@ -25,4 +26,9 @@ type RegistryManager interface {
 	GetContainerManager() *container.Manager
 	GetProcessTree() *process.ProcessTree
 	GetDNSCache() *dns.DNSCache
+	GetIPReputationStore() *ipreputation.Store
+
+	// GetIPReputationRuntime returns a gRPC datastore runtime that serves the
+	// IP reputation store for external feeds (write, delete, clear, list).
+	GetIPReputationRuntime() datastores.Runtime
 }

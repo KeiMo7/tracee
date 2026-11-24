@@ -11,6 +11,7 @@ import (
 	"github.com/aquasecurity/tracee/api/v1beta1/datastores"
 	"github.com/aquasecurity/tracee/pkg/datastores/container"
 	"github.com/aquasecurity/tracee/pkg/datastores/dns"
+	"github.com/aquasecurity/tracee/pkg/datastores/ipreputation"
 	"github.com/aquasecurity/tracee/pkg/datastores/process"
 )
 
@@ -42,6 +43,7 @@ type Registry struct {
 	dnsStore          datastores.DNSStore
 	systemStore       datastores.SystemStore
 	syscallStore      datastores.SyscallStore
+	ipReputationStore datastores.IPReputationStore
 
 	// Lifecycle tracking
 	initialized map[string]bool
@@ -59,6 +61,7 @@ func NewRegistry() *Registry {
 		dnsStore:          &nullDNSStore{},
 		systemStore:       &nullSystemStore{},
 		syscallStore:      &nullSyscallStore{},
+		ipReputationStore: &nullIPReputationStore{},
 	}
 }
 
@@ -125,6 +128,10 @@ func (r *Registry) RegisterStore(name string, store datastores.DataStore, requir
 		if sc, ok := store.(datastores.SyscallStore); ok {
 			r.syscallStore = sc
 		}
+	case datastores.IPReputationStoreName:
+		if ips, ok := store.(datastores.IPReputationStore); ok {
+			r.ipReputationStore = ips
+		}
 	}
 
 	r.stores[name] = store
@@ -160,6 +167,11 @@ func (r *Registry) System() datastores.SystemStore {
 // Syscalls returns the syscall information datastore
 func (r *Registry) Syscalls() datastores.SyscallStore {
 	return r.syscallStore
+}
+
+// IPReputation returns the IP reputation datastore
+func (r *Registry) IPReputation() datastores.IPReputationStore {
+	return r.ipReputationStore
 }
 
 // GetCustom returns a custom datastore by name with type safety
@@ -373,4 +385,27 @@ func (r *Registry) GetDNSCache() *dns.DNSCache {
 		return nil
 	}
 	return cache
+}
+
+// GetIPReputationStore returns the concrete ipreputation.Store for internal
+// Tracee use. Returns nil if the store is not registered or is of wrong type.
+func (r *Registry) GetIPReputationStore() *ipreputation.Store {
+	if r.ipReputationStore == nil {
+		return nil
+	}
+	s, ok := r.ipReputationStore.(*ipreputation.Store)
+	if !ok {
+		return nil
+	}
+	return s
+}
+
+// GetIPReputationRuntime returns a Runtime that serves the IP reputation store
+// over gRPC. Returns nil if the store is not registered.
+func (r *Registry) GetIPReputationRuntime() datastores.Runtime {
+	store := r.GetIPReputationStore()
+	if store == nil {
+		return nil
+	}
+	return NewWritableStoreRuntime(datastores.IPReputationStoreName, store)
 }

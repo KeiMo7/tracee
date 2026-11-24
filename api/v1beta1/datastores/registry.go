@@ -43,6 +43,11 @@ type Registry interface {
 	// Never returns nil - check IsAvailable("syscall") for availability
 	Syscalls() SyscallStore
 
+	// IPReputation returns the IP reputation datastore used for threat
+	// intelligence lookups. It is always registered and always non-nil; when no
+	// data has been ingested every lookup returns ErrNotFound.
+	IPReputation() IPReputationStore
+
 	// GetCustom retrieves a custom datastore by name
 	// Returns ErrNotFound if the datastore is not registered
 	GetCustom(name string) (DataStore, error)

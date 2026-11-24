@@ -34,6 +34,7 @@ import (
 	"github.com/aquasecurity/tracee/pkg/datastores"
 	"github.com/aquasecurity/tracee/pkg/datastores/container"
 	"github.com/aquasecurity/tracee/pkg/datastores/dns"
+	"github.com/aquasecurity/tracee/pkg/datastores/ipreputation"
 	"github.com/aquasecurity/tracee/pkg/datastores/process"
 	"github.com/aquasecurity/tracee/pkg/datastores/symbol"
 	"github.com/aquasecurity/tracee/pkg/datastores/syscall"
@@ -200,12 +201,20 @@ func (t *Tracee) RegisterDatastoreRuntime(runtime dsapi.Runtime) error {
 	return t.extensions.RegisterDatastoreRuntime(runtime)
 }
 
-// DatastoreRuntimes returns extension-provided datastore runtimes, if any.
+// DatastoreRuntimes returns datastore runtimes to be served over gRPC. It
+// includes the core IP reputation store (fed by external threat intelligence)
+// followed by any extension-provided runtimes.
 func (t *Tracee) DatastoreRuntimes() []dsapi.Runtime {
-	if t.extensions == nil {
-		return nil
+	var runtimes []dsapi.Runtime
+	if t.dataStoreRegistry != nil {
+		if rt := t.dataStoreRegistry.GetIPReputationRuntime(); rt != nil {
+			runtimes = append(runtimes, rt)
+		}
 	}
-	return t.extensions.DatastoreRuntimes()
+	if t.extensions != nil {
+		runtimes = append(runtimes, t.extensions.DatastoreRuntimes()...)
+	}
+	return runtimes
 }
 
 func (t *Tracee) getKernelSymbols() *symbol.KernelSymbolTable {
@@ -620,6 +629,15 @@ func (t *Tracee) Init(ctx gocontext.Context) error {
 	// Syscall information datastore provides syscall ID <-> name mapping
 	syscallStore := syscall.New(events.Core)
 	if err := t.dataStoreRegistry.RegisterStore(dsapi.Syscall, syscallStore, true); err != nil {
+		return errfmt.WrapError(err)
+	}
+
+	// IP reputation datastore backs threat-intelligence lookups from detectors.
+	// Tracee owns this store: it is always registered so that lookups and the
+	// CEL ip.* functions work even before any feed has written data, and it is
+	// exposed as a gRPC runtime below so external feeds can ingest into it.
+	ipRepStore := ipreputation.NewIPReputationStoreWithConfig(t.config.IPReputationStore)
+	if err := t.dataStoreRegistry.RegisterStore(dsapi.IPReputationStoreName, ipRepStore, false); err != nil {
 		return errfmt.WrapError(err)
 	}
 
